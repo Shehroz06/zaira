@@ -40,7 +40,7 @@ python scripts/build_index.py
   - `--workers` (default 1): concurrent in-flight embedding requests. Ollama pins embedding models to a single processing slot regardless of concurrency, so raising this rarely helps and can hurt under memory pressure
   - `--restart`: ignore any existing checkpoint and start over
 
-This produces `data/recipes.json` and `data/embeddings.npy`. Without a prepared dataset, Zaira falls back to the bundled `demo_recipes.json`. For datasets larger than `ZAIRA_RUNTIME_EMBED_LIMIT` (default 32), `data/embeddings.npy` must be precomputed — Zaira won't embed a large dataset at request time.
+This produces `data/recipes.json` and `data/embeddings.npy`. Without a prepared dataset, Zaira falls back to the bundled `demo/demo_recipes.json`. For datasets larger than `ZAIRA_RUNTIME_EMBED_LIMIT` (default 32), `data/embeddings.npy` must be precomputed — Zaira won't embed a large dataset at request time.
 
 ## Using the app while a large index is still building
 

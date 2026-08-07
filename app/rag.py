@@ -26,7 +26,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 DATASET_RECIPES = DATA_DIR / "recipes.json"
 DATASET_EMBEDDINGS = DATA_DIR / "embeddings.npy"
-FALLBACK_RECIPES = BASE_DIR / "demo_recipes.json"
+FALLBACK_RECIPES = BASE_DIR / "demo" / "demo_recipes.json"
 
 DEFAULT_K = 2
 DEFAULT_MIN_RELEVANCE = float(os.environ.get("ZAIRA_MIN_RELEVANCE", "0.50"))
