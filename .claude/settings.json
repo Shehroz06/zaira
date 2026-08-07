@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(python3 -c \"import json; d=json.load\\(open\\('demo_recipes.json'\\)\\); print\\(len\\(d\\)\\); print\\(json.dumps\\(d[0], indent=2\\)\\)\")",
-      "Bash(curl -s --max-time 10 -X POST http://localhost:11434/api/embed -H \"Content-Type: application/json\" -d '{\"model\":\"nomic-embed-text\",\"input\":[\"hello world\",\"second text\"]}')",
-      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('embeddings count:', len\\(d.get\\('embeddings',[]\\)\\)\\); print\\('dims:', len\\(d['embeddings'][0]\\) if d.get\\('embeddings'\\) else None\\)\")"
-    ]
-  }
-}
