@@ -1,0 +1,20 @@
+[
+  {
+    "title": "Chicken Biryani",
+    "ingredients": ["chicken", "rice", "onion", "spices"],
+    "steps": [
+      "Boil rice",
+      "Cook chicken with spices",
+      "Layer and steam"
+    ]
+  },
+  {
+    "title": "Omelette",
+    "ingredients": ["eggs", "salt", "oil"],
+    "steps": [
+      "Beat eggs",
+      "Heat pan",
+      "Cook eggs"
+    ]
+  }
+]

@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zaira - Cooking Assistant</title>
+<style>
+  :root {
+    --bg: #faf7f2;
+    --surface: #ffffff;
+    --border: #e8e1d6;
+    --text: #2b2420;
+    --text-muted: #7a7167;
+    --accent: #d9822b;
+    --accent-hover: #c26f1e;
+    --accent-text: #ffffff;
+    --shadow: 0 1px 3px rgba(43, 36, 32, 0.08), 0 8px 24px rgba(43, 36, 32, 0.06);
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #1c1815;
+    --surface: #262019;
+    --border: #3a332b;
+    --text: #f2ece3;
+    --text-muted: #a89d8e;
+    --accent: #e69a42;
+    --accent-hover: #f0ab5c;
+    --accent-text: #1c1815;
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.25);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1c1815;
+      --surface: #262019;
+      --border: #3a332b;
+      --text: #f2ece3;
+      --text-muted: #a89d8e;
+      --accent: #e69a42;
+      --accent-hover: #f0ab5c;
+      --accent-text: #1c1815;
+      --shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.25);
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    transition: background 0.2s ease, color 0.2s ease;
+  }
+
+  .page {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 47px 20px 64px;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 28px;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .subtitle {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    margin: 4px 0 0;
+  }
+
+  .theme-toggle {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 1.1rem;
+    transition: transform 0.15s ease, background 0.2s ease;
+  }
+
+  .theme-toggle:hover {
+    transform: scale(1.06);
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+
+  .input-row {
+    display: flex;
+    gap: 10px;
+  }
+
+  input[type="text"] {
+    flex: 1;
+    padding: 12px 14px;
+    font-size: 1rem;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    outline: none;
+    transition: border-color 0.15s ease;
+  }
+
+  input[type="text"]:focus {
+    border-color: var(--accent);
+  }
+
+  button {
+    padding: 12px 20px;
+    font-size: 1rem;
+    font-weight: 600;
+    border: none;
+    border-radius: 10px;
+    background: var(--accent);
+    color: var(--accent-text);
+    cursor: pointer;
+    transition: background 0.15s ease, opacity 0.15s ease;
+    white-space: nowrap;
+  }
+
+  button:hover:not(:disabled) {
+    background: var(--accent-hover);
+  }
+
+  button:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    margin-top: 14px;
+    min-height: 1.2em;
+  }
+
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: pulse 1s ease-in-out infinite;
+  }
+
+  .dot:nth-child(2) { animation-delay: 0.15s; }
+  .dot:nth-child(3) { animation-delay: 0.3s; }
+
+  @keyframes pulse {
+    0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); }
+    40% { opacity: 1; transform: scale(1); }
+  }
+
+  #intro {
+    white-space: pre-wrap;
+    line-height: 1.6;
+    font-size: 0.98rem;
+  }
+
+  #intro:empty {
+    display: none;
+  }
+
+  .output-card {
+    display: none;
+  }
+
+  .output-card.visible {
+    display: block;
+  }
+
+  #recipe-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .recipe-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .recipe-card summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .recipe-card summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .recipe-card summary::after {
+    content: "▸";
+    color: var(--text-muted);
+    flex-shrink: 0;
+    transition: transform 0.15s ease;
+  }
+
+  .recipe-card[open] summary::after {
+    transform: rotate(90deg);
+  }
+
+  .recipe-card-title {
+    font-weight: 600;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .recipe-card-meta {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .recipe-card-body {
+    padding: 0 16px 16px;
+    border-top: 1px solid var(--border);
+    font-size: 0.95rem;
+    line-height: 1.6;
+  }
+
+  .recipe-card-body h4 {
+    margin: 14px 0 6px;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-muted);
+  }
+
+  .recipe-card-body ul,
+  .recipe-card-body ol {
+    margin: 0;
+    padding-left: 1.2em;
+  }
+
+  .ingredients-columns {
+    display: flex;
+    align-items: stretch;
+  }
+
+  .ingredients-columns ul {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .ingredients-columns ul:first-child {
+    padding-right: 20px;
+  }
+
+  .ingredients-columns ul:last-child:not(:only-child) {
+    border-left: 1px solid var(--border);
+    padding-left: 20px;
+  }
+
+  @media (max-width: 520px) {
+    .ingredients-columns {
+      flex-direction: column;
+    }
+
+    .ingredients-columns ul:last-child:not(:only-child) {
+      border-left: none;
+      padding-left: 1.2em;
+      border-top: 1px solid var(--border);
+      padding-top: 10px;
+      margin-top: 10px;
+    }
+  }
+
+  .recipe-card-notes {
+    margin-top: 14px;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
+</style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div>
+        <h1> 👨‍🍳 Zaira</h1>
+        <p class="subtitle">Your local cooking assistant</p>
+      </div>
+      <button class="theme-toggle" id="theme-toggle" title="Toggle theme" aria-label="Toggle light/dark theme">🌙</button>
+    </header>
+
+    <div class="card">
+      <div class="input-row">
+        <input id="query" type="text" placeholder="What do you want to cook?" autofocus>
+        <button id="ask">Ask</button>
+      </div>
+      <div class="status" id="status"></div>
+    </div>
+
+    <div class="card output-card" id="output-card">
+      <div id="intro"></div>
+    </div>
+
+    <div id="recipe-cards"></div>
+  </div>
+
+  <script>
+    const RECIPES_DELIMITER = "\n<<<ZAIRA_RECIPES_JSON>>>\n";
+
+    const root = document.documentElement;
+    const themeToggle = document.getElementById("theme-toggle");
+    const askBtn = document.getElementById("ask");
+    const queryInput = document.getElementById("query");
+    const intro = document.getElementById("intro");
+    const outputCard = document.getElementById("output-card");
+    const recipeCards = document.getElementById("recipe-cards");
+    const status = document.getElementById("status");
+
+    function applyTheme(theme) {
+      root.setAttribute("data-theme", theme);
+      themeToggle.textContent = theme === "dark" ? "☀️" : "🌙";
+    }
+
+    const savedTheme = localStorage.getItem("zaira-theme");
+    if (savedTheme) applyTheme(savedTheme);
+    else applyTheme(window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+
+    themeToggle.addEventListener("click", () => {
+      const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      applyTheme(next);
+      localStorage.setItem("zaira-theme", next);
+    });
+
+    function setLoading(isLoading) {
+      askBtn.disabled = isLoading;
+      queryInput.disabled = isLoading;
+      status.innerHTML = isLoading
+        ? '<span class="dot"></span><span class="dot"></span><span class="dot"></span> thinking'
+        : "";
+    }
+
+    function metaLine(card) {
+      const parts = [];
+      if (card.total_time) parts.push(`⏱ ${card.total_time} min`);
+      // "non-vegetarian" is an inferred default (any meat-marker ingredient
+      // match, including false positives like "vegetable broth") rather than
+      // a deliberate tag, so it's noise here — only surface real dietary claims.
+      const usefulDiet = (card.diet || []).filter((d) => d !== "non-vegetarian");
+      if (usefulDiet.length) parts.push(usefulDiet.join(", "));
+      if (card.meal_type && card.meal_type.length) parts.push(card.meal_type.join(", "));
+      return parts.join(" · ");
+    }
+
+    function notesLine(card) {
+      const parts = [];
+      if (card.equipment && card.equipment.length) parts.push(`Equipment: ${card.equipment.join(", ")}`);
+      if (card.prep_time) parts.push(`Prep: ${card.prep_time} min`);
+      if (card.cook_time) parts.push(`Cook: ${card.cook_time} min`);
+      return parts.join(" · ");
+    }
+
+    function buildList(tag, items) {
+      const list = document.createElement(tag);
+      for (const item of items) {
+        const li = document.createElement("li");
+        li.textContent = item;
+        list.appendChild(li);
+      }
+      return list;
+    }
+
+    function renderCards(cards) {
+      recipeCards.innerHTML = "";
+      for (const card of cards) {
+        const details = document.createElement("details");
+        details.className = "recipe-card";
+
+        const summary = document.createElement("summary");
+        const title = document.createElement("span");
+        title.className = "recipe-card-title";
+        title.textContent = card.title || "Recipe";
+        summary.appendChild(title);
+
+        const meta = metaLine(card);
+        if (meta) {
+          const metaEl = document.createElement("span");
+          metaEl.className = "recipe-card-meta";
+          metaEl.textContent = meta;
+          summary.appendChild(metaEl);
+        }
+        details.appendChild(summary);
+
+        const body = document.createElement("div");
+        body.className = "recipe-card-body";
+
+        if (card.ingredients && card.ingredients.length) {
+          const h4 = document.createElement("h4");
+          h4.textContent = "Ingredients";
+          body.appendChild(h4);
+
+          // Two explicit <ul> columns in a flex row (not CSS `column-count`)
+          // so the divider between them — a border on the second column —
+          // only ever spans the actual (equal, flex-stretched) height of the
+          // two lists, instead of column-rule's habit of running the full
+          // theoretical column height into empty space when counts are uneven.
+          const columns = document.createElement("div");
+          columns.className = "ingredients-columns";
+          if (card.ingredients.length >= 4) {
+            const half = Math.ceil(card.ingredients.length / 2);
+            columns.appendChild(buildList("ul", card.ingredients.slice(0, half)));
+            columns.appendChild(buildList("ul", card.ingredients.slice(half)));
+          } else {
+            columns.appendChild(buildList("ul", card.ingredients));
+          }
+          body.appendChild(columns);
+        }
+
+        if (card.steps && card.steps.length) {
+          const h4 = document.createElement("h4");
+          h4.textContent = "Steps";
+          body.appendChild(h4);
+          body.appendChild(buildList("ol", card.steps));
+        }
+
+        const notes = notesLine(card);
+        if (notes) {
+          const notesEl = document.createElement("div");
+          notesEl.className = "recipe-card-notes";
+          notesEl.textContent = notes;
+          body.appendChild(notesEl);
+        }
+
+        details.appendChild(body);
+        recipeCards.appendChild(details);
+      }
+    }
+
+    const QUOTE_PAIRS = [['"', '"'], ["“", "”"], ["'", "'"]];
+
+    // Small local models don't reliably follow "no quotation marks" prompt
+    // instructions, so the intro text sometimes arrives wrapped in a stray
+    // leading/trailing quote. Stripped defensively rather than relying on
+    // the prompt alone.
+    function stripLeadingQuote(text) {
+      if (text.length > 0 && QUOTE_PAIRS.some(([open]) => text[0] === open)) {
+        return text.slice(1);
+      }
+      return text;
+    }
+
+    function stripWrappingQuotes(text) {
+      for (const [open, close] of QUOTE_PAIRS) {
+        if (text.length >= 2 && text.startsWith(open) && text.endsWith(close)) {
+          return text.slice(1, -1).trim();
+        }
+      }
+      return text;
+    }
+
+    async function ask() {
+      const text = queryInput.value.trim();
+      if (!text) return;
+
+      outputCard.classList.add("visible");
+      intro.textContent = "";
+      recipeCards.innerHTML = "";
+      setLoading(true);
+
+      try {
+        const res = await fetch("/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text })
+        });
+
+        if (!res.ok || !res.body) {
+          intro.textContent = `Error: server responded with ${res.status}`;
+          return;
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const delimiterIndex = buffer.indexOf(RECIPES_DELIMITER);
+          const introSoFar = delimiterIndex === -1 ? buffer : buffer.slice(0, delimiterIndex);
+          intro.textContent = stripLeadingQuote(introSoFar);
+        }
+
+        const delimiterIndex = buffer.indexOf(RECIPES_DELIMITER);
+        const fullIntro = delimiterIndex === -1 ? buffer : buffer.slice(0, delimiterIndex);
+        intro.textContent = stripWrappingQuotes(fullIntro);
+
+        if (delimiterIndex !== -1) {
+          const jsonPart = buffer.slice(delimiterIndex + RECIPES_DELIMITER.length);
+          try {
+            renderCards(JSON.parse(jsonPart));
+          } catch (err) {
+            // Malformed card payload — leave the intro text as the whole response.
+          }
+        }
+      } catch (err) {
+        intro.textContent = "Error: " + err.message;
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    askBtn.addEventListener("click", ask);
+    queryInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") ask();
+    });
+  </script>
+</body>
+</html>
