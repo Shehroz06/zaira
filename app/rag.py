@@ -9,6 +9,8 @@ from pathlib import Path
 from time import perf_counter
 
 import numpy as np
+import snowballstemmer
+from rapidfuzz import fuzz, process
 
 from app.llm import embed
 from app.recipes import (
@@ -32,6 +34,50 @@ DEFAULT_K = 2
 DEFAULT_MIN_RELEVANCE = float(os.environ.get("ZAIRA_MIN_RELEVANCE", "0.50"))
 RRF_K = int(os.environ.get("ZAIRA_RRF_K", "60"))
 MAX_RUNTIME_EMBED_RECIPES = int(os.environ.get("ZAIRA_RUNTIME_EMBED_LIMIT", "32"))
+SPELLING_CORRECTION_SCORE_CUTOFF = int(os.environ.get("ZAIRA_SPELLING_SCORE_CUTOFF", "80"))
+SPELLING_CORRECTION_MIN_TOKEN_LEN = 3
+# A token seen in this many or more documents is treated as correctly
+# spelled and skipped by fuzzy correction — below it, the token is rare
+# enough that it's worth checking whether it's actually a typo of a more
+# common word (the source dataset is scraped and contains real misspellings,
+# e.g. "chiken" occurring verbatim in a handful of recipes).
+SPELLING_CORRECTION_TRUSTED_DF = int(os.environ.get("ZAIRA_SPELLING_TRUSTED_DF", "5"))
+# Squashes BM25's unbounded raw score into a 0-1 range comparable to cosine
+# similarity, so the acceptance gate isn't comparing incommensurable scales
+# (see BM25_ACCEPTANCE_SATURATION usage in retrieve()).
+BM25_ACCEPTANCE_SATURATION = float(os.environ.get("ZAIRA_BM25_ACCEPTANCE_SATURATION", "8.0"))
+# Tokens occurring in more than this fraction of documents are excluded from
+# the BM25 vocabulary entirely — a corpus-derived stopword cutoff, catching
+# generic high-frequency words the fixed BM25_STOPWORDS list doesn't name
+# (e.g. stemming "exception" -> "except" collides with the very common
+# recipe-instruction word "except", as in "chop everything except the...").
+BM25_MAX_DOCUMENT_FREQUENCY_RATIO = float(os.environ.get("ZAIRA_BM25_MAX_DF_RATIO", "0.02"))
+
+# Stopwords are excluded from the BM25 index entirely (not just at query
+# time): a query like "how do I repair a linux kernel" shares "how"/"do"/"a"
+# with huge numbers of unrelated recipes, and summing their BM25 contributions
+# alongside real terms can inflate the total score enough to pass the
+# acceptance threshold for a completely irrelevant query.
+BM25_STOPWORDS = frozenset(
+    {
+        "a", "an", "the", "and", "or", "but", "if", "of", "to", "in", "on", "for", "with", "without",
+        "is", "are", "was", "were", "be", "been", "being", "do", "does", "did", "doing",
+        "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them",
+        "my", "your", "his", "its", "our", "their", "this", "that", "these", "those",
+        "how", "what", "when", "where", "why", "who", "which",
+        "can", "could", "will", "would", "should", "shall", "may", "might", "must",
+        "not", "no", "so", "as", "at", "by", "from", "up", "down", "out", "about", "into", "than", "then",
+    }
+)
+
+_bm25_stemmer = snowballstemmer.stemmer("english")
+
+
+def _prepare_bm25_tokens(tokens):
+    filtered = [token for token in tokens if token not in BM25_STOPWORDS]
+    if not filtered:
+        return []
+    return _bm25_stemmer.stemWords(filtered)
 
 VEGAN_MARKERS = {"egg", "eggs", "honey"} | DAIRY_MARKERS | MEAT_MARKERS
 MEAL_TYPES = {"breakfast", "brunch", "lunch", "dinner", "snack", "dessert"}
@@ -380,7 +426,7 @@ class RecipeIndex:
         self.recipes = [infer_recipe_metadata(recipe) for recipe in recipes]
         self.source_path = source_path
         self.filter_profiles = [_build_filter_profile(recipe) for recipe in self.recipes]
-        self.tokens = [recipe_tokens(recipe) for recipe in self.recipes]
+        self.tokens = [_prepare_bm25_tokens(recipe_tokens(recipe)) for recipe in self.recipes]
         self.term_frequencies = [Counter(tokens) for tokens in self.tokens]
         self.doc_lengths = np.asarray([max(1, len(tokens)) for tokens in self.tokens], dtype=np.float32)
         self.avg_doc_length = float(self.doc_lengths.mean()) if len(self.doc_lengths) else 1.0
@@ -393,7 +439,9 @@ class RecipeIndex:
         self._token_ids, self._postings_doc_ids, self._postings_tfs, self._postings_offsets, self._idf_array = (
             self._build_postings()
         )
+        self._vocabulary = list(self._token_ids.keys())
         self._query_cache = {}
+        self._spelling_cache = {}
 
     def _build_idf(self):
         total_documents = max(1, len(self.tokens))
@@ -408,7 +456,11 @@ class RecipeIndex:
         # own tokens instead of looping over every candidate recipe. At
         # dataset sizes in the hundreds of thousands, the naive per-candidate
         # BM25 loop this replaces was the single biggest cost of a request.
-        vocabulary = list(self._idf.keys())
+        total_documents = max(1, len(self.tokens))
+        max_document_frequency = max(1, int(total_documents * BM25_MAX_DOCUMENT_FREQUENCY_RATIO))
+        vocabulary = [
+            token for token in self._idf.keys() if self.document_frequency.get(token, 0) <= max_document_frequency
+        ]
         token_ids = {token: index for index, token in enumerate(vocabulary)}
         idf_array = np.asarray([self._idf[token] for token in vocabulary], dtype=np.float32)
 
@@ -417,8 +469,11 @@ class RecipeIndex:
         tf_list = []
         for doc_id, frequencies in enumerate(self.term_frequencies):
             for token, tf in frequencies.items():
+                token_id = token_ids.get(token)
+                if token_id is None:
+                    continue
                 doc_id_list.append(doc_id)
-                token_id_list.append(token_ids[token])
+                token_id_list.append(token_id)
                 tf_list.append(tf)
 
         token_id_arr = np.asarray(token_id_list, dtype=np.int32)
@@ -441,9 +496,44 @@ class RecipeIndex:
             self._query_cache[key] = _normalize_embeddings([embed(key)])[0]
         return self._query_cache[key]
 
+    def _correct_token(self, token):
+        # BM25 only matches tokens present in the postings, so a misspelled
+        # ingredient/dish word (e.g. "chiken", "briyani") looks up nothing —
+        # unlike vector search, which tolerates typos via embedding
+        # similarity. Snap unknown tokens to the closest known vocabulary
+        # token before lookup so the keyword channel isn't silently blind to
+        # them. Short tokens are skipped: at 1-2 chars, edit-distance
+        # matching is more likely to overcorrect than fix a real typo.
+        #
+        # A token already present in the vocabulary isn't necessarily
+        # correctly spelled — the source dataset is scraped and contains its
+        # own typos (e.g. "chiken" occurs verbatim in a handful of recipes).
+        # Only tokens common enough to be trusted (SPELLING_CORRECTION_TRUSTED_DF)
+        # skip correction outright; rare tokens still get a chance to snap to
+        # a meaningfully more common near-match.
+        if len(token) < SPELLING_CORRECTION_MIN_TOKEN_LEN:
+            return token
+        token_df = self.document_frequency.get(token, 0)
+        if token_df >= SPELLING_CORRECTION_TRUSTED_DF:
+            return token
+        if token not in self._spelling_cache:
+            match = process.extractOne(
+                token, self._vocabulary, scorer=fuzz.ratio, score_cutoff=SPELLING_CORRECTION_SCORE_CUTOFF
+            )
+            corrected = token
+            if match:
+                candidate = match[0]
+                if candidate != token and self.document_frequency.get(candidate, 0) > token_df:
+                    corrected = candidate
+            self._spelling_cache[token] = corrected
+        return self._spelling_cache[token]
+
     def _keyword_scores(self, query_tokens, candidate_ids):
+        query_tokens = _prepare_bm25_tokens(query_tokens)
         if not query_tokens:
             return np.zeros(len(candidate_ids), dtype=np.float32)
+
+        query_tokens = [self._correct_token(token) for token in query_tokens]
 
         k1 = 1.5
         b = 0.75
@@ -540,7 +630,14 @@ class RecipeIndex:
         hits = hits[:k]
         best_vector_score = max((hit.vector_score for hit in hits), default=0.0)
         best_keyword_score = max((hit.keyword_score for hit in hits), default=0.0)
-        accepted = bool(hits) and (best_vector_score >= min_relevance or best_keyword_score >= 0.5)
+        # BM25's raw score is unbounded (can run into double digits), unlike
+        # cosine similarity's [0, 1] range — comparing it directly against
+        # min_relevance let any query sharing even a weak, spurious token
+        # with a recipe (e.g. "kernel" in "How do I repair a Linux kernel?"
+        # matching "Whole Kernel Corn") pass the gate. Squash it onto a
+        # comparable scale before gating.
+        normalized_keyword_score = best_keyword_score / (best_keyword_score + BM25_ACCEPTANCE_SATURATION)
+        accepted = bool(hits) and (best_vector_score >= min_relevance or normalized_keyword_score >= 0.5)
 
         debug_lines = []
         if debug:

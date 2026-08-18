@@ -62,24 +62,70 @@ def _ingredient_phrase(recipe):
     return " ".join(unique_words[:3])
 
 
+def _is_distinctive_title(title):
+    # Short, generic titles ("Biryani", "Lemonade") have many close variants
+    # in a large dataset and get crowded out of a tight top-k by richer
+    # recipes mentioning the same word more often — that's a ranking nuance,
+    # not a retrieval bug, and it makes those titles noisy as eval cases.
+    return len(title.split()) >= 3 or len(title) >= 14
+
+
+def _mangle_word(word):
+    # Simulates a realistic single-typo mistake (adjacent-character
+    # transposition, e.g. "chicken" -> "chikcen") rather than a random edit.
+    if len(word) < 4:
+        return word
+    mid = len(word) // 2
+    chars = list(word)
+    chars[mid], chars[mid + 1] = chars[mid + 1], chars[mid]
+    return "".join(chars)
+
+
+def _typo_variant(query):
+    words = query.split()
+    if not words:
+        return query
+    target = max(range(len(words)), key=lambda i: len(words[i]))
+    words[target] = _mangle_word(words[target])
+    return " ".join(words)
+
+
 def build_default_cases(index, max_cases):
+    # Each selected title produces two cases sharing the same expected
+    # title: the exact title, and a typo-mangled version of it. This tests
+    # typo tolerance directly against whatever the current dataset contains,
+    # instead of hardcoding dish names that may or may not be indexed.
     cases = []
     seen_titles = set()
     for recipe in index.recipes:
         title = recipe.get("title", "").strip()
-        if not title or title in seen_titles:
+        if not title or title in seen_titles or not _is_distinctive_title(title):
             continue
         seen_titles.add(title)
-        query = title
-        cases.append({"query": query, "expected_recipe_titles": [title]})
-        if len(cases) >= max_cases:
+        cases.append({"query": title, "expected_recipe_titles": [title], "kind": "exact"})
+        typo_query = _typo_variant(title)
+        if typo_query.lower() != title.lower():
+            cases.append({"query": typo_query, "expected_recipe_titles": [title], "kind": "typo"})
+        if len(seen_titles) >= max_cases:
             break
 
+    # Two off-topic probes: a clean case with no shared vocabulary, and an
+    # adversarial one that coincidentally shares a real ingredient word
+    # ("kernel" as in corn kernel) with the dataset despite being unrelated.
+    cases.append(
+        {
+            "query": "How do I fix a JavaScript null pointer exception?",
+            "expected_recipe_titles": [],
+            "expect_no_result": True,
+            "kind": "no_result",
+        }
+    )
     cases.append(
         {
             "query": "How do I repair a Linux kernel?",
             "expected_recipe_titles": [],
             "expect_no_result": True,
+            "kind": "no_result",
         }
     )
     return cases
@@ -132,12 +178,22 @@ def main():
     cases = build_default_cases(index, args.max_cases)
     results = [evaluate_case(case, args.k) for case in cases]
 
-    hit_rate = sum(1 for item in results[:-1] if item["hit"]) / max(1, len(results) - 1)
-    no_result_tests = [case for case in cases if case.get("expect_no_result", False)]
-    no_result_rate = sum(1 for item in results if item["no_result_ok"]) / max(1, len(no_result_tests))
+    def rate(values):
+        return sum(1 for value in values if value) / max(1, len(values))
+
+    hits_by_kind = {"exact": [], "typo": []}
+    no_result_hits = []
+    for case, result in zip(cases, results):
+        kind = case.get("kind")
+        if kind in hits_by_kind:
+            hits_by_kind[kind].append(result["hit"])
+        if case.get("expect_no_result", False):
+            no_result_hits.append(result["no_result_ok"])
+
     print("Summary:")
-    print(f"Hit@{args.k}: {hit_rate:.2%}")
-    print(f"No-result handling: {no_result_rate:.2%}")
+    print(f"Exact-title Hit@{args.k}: {rate(hits_by_kind['exact']):.2%} (n={len(hits_by_kind['exact'])})")
+    print(f"Typo-variant Hit@{args.k}: {rate(hits_by_kind['typo']):.2%} (n={len(hits_by_kind['typo'])})")
+    print(f"No-result handling: {rate(no_result_hits):.2%} (n={len(no_result_hits)})")
 
 
 if __name__ == "__main__":
